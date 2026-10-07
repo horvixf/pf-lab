@@ -122,6 +122,7 @@ def sampled(con, U):
         s["cost"] = cost / LAM if cost is not None else None
         s["cfee_sol"] = s["cfee"] / LAM
         s["net"] = (s["cfee"] + s["sell"] - s["buy"] - cost) / LAM if cost is not None else None
+        s["fee_net"] = (s["cfee"] - cost) / LAM if cost is not None else None
         s["organic"] = u["organic_u"] and s["n_curve"] > 5 and s["same_slot"] < 3
         m = meta.get(mint)
         s["meta_ok"] = bool(m and m[1])
@@ -179,6 +180,7 @@ def estimate(U, S, L, M=None, f=None, boot=BOOT):
             "ci95": [round(reps[int(.025 * len(reps))], 5), round(reps[int(.975 * len(reps)) - 1], 5)] if reps else None,
             "p50": q(.5), "p75": q(.75), "p90": q(.9), "p99": q(.99),
             "share_pos": round(sum(x for v, x in w if v > 0) / tw, 4) if tw else None,
+            "mean_by_stratum": {st: round(sum(parts[st][1]) / len(parts[st][1]), 5) for st in parts if parts[st][1]},
             "est_launches": round(size_g + size_n), "grad_share": round(size_g / (size_g + size_n), 4) if size_g + size_n else None,
             "n_sampled": {st: len(parts[st][1]) for st in parts}}
 
@@ -324,6 +326,32 @@ def main():
         }
         t = R["strategies"][name]["test"]
         R["strategies"][name]["gate_pass"] = bool(t and t["mean"] > 0 and (t["t"] or 0) > 2 and t["est_launches"] >= 300)
+
+    fee_net = lambda s: s["fee_net"]
+    base = lambda u: small(u) and u["launches"] <= 4
+    legit = {
+        "S1_small_few_launches": (base, None),
+        "S2_S1_x_web": (base, lambda s: s.get("meta_ok") and s["twitter"] and s["website"]),
+        "S3_S1_original": (lambda u: base(u) and not u["copycat"], None),
+        "S4_S2_original": (lambda u: base(u) and not u["copycat"], lambda s: s.get("meta_ok") and s["twitter"] and s["website"]),
+        "S5_S4_evening_exploratory": (lambda u: base(u) and not u["copycat"] and u["hour"] >= 18, lambda s: s.get("meta_ok") and s["twitter"] and s["website"]),
+    }
+    R["legit_fee_only"] = {}
+    for name, (L, M) in legit.items():
+        row = {}
+        for split in ("train", "test", "all"):
+            Ls = lambda u, L=L, split=split: L(u) and (not u["grad"] or u["organic_u"]) and (split == "all" or u["test"] == (split == "test"))
+            Mlow = lambda s, M=M: (M is None or M(s)) and (s["stratum"] == "n" or s["organic"])
+            row[split] = {"upper": estimate(U, S, Ls, M, fee_net), "lower": estimate(U, S, Ls, Mlow, fee_net)}
+        t = row["test"]["lower"]
+        row["gate_pass_lower"] = bool(t and t["mean"] > 0 and (t["t"] or 0) > 2 and t["est_launches"] >= 300)
+        t = row["test"]["upper"]
+        row["gate_pass_upper"] = bool(t and t["mean"] > 0 and (t["t"] or 0) > 2 and t["est_launches"] >= 300)
+        R["legit_fee_only"][name] = row
+    og = [s for s in S.values() if s["stratum"] == "g" and s["organic"]]
+    R["organic_grads"] = {"n": len(og), "capped": sum(s["capped"] or 0 for s in og),
+                          "fee_sol_mean": round(sum(s["cfee_sol"] for s in og) / max(1, len(og)), 4),
+                          "fee_sol_sorted": sorted(round(s["cfee_sol"], 3) for s in og)}
 
     dur = defaultdict(Counter)
     for m, s in S.items():
