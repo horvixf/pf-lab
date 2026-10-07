@@ -1,0 +1,35 @@
+[window]
+start = "2026-09-15"
+days = 14
+test_from = "2026-09-25"
+
+[rpc]
+url = "https://mainnet.helius-rpc.com/?api-key="
+rps = 8
+workers = 8
+
+[http]
+pf_rps = 0.9
+dex_rps = 4
+
+[addr]
+pump = "6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P"
+amm = "pAMMBay6oceH9fJKBRHGP5D4bD4sWpmSwMn52FMfXEA"
+mint_auth = "TSLvdd1pWpHVjahSpsvCXUbgwsL3JAcvokwaKt1eokM"
+migr_fee = "39azUYFWPz3VHgKCf3VChUwbpURdCHRxjWVowf5jUJjg"
+wsol = "So11111111111111111111111111111111111111112"
+
+[idl]
+pump = "https://raw.githubusercontent.com/pump-fun/pump-public-docs/cb188ce08b5069196eef1f3e4a0c43b70099793b/idl/pump.json"
+amm = "https://raw.githubusercontent.com/pump-fun/pump-public-docs/cb188ce08b5069196eef1f3e4a0c43b70099793b/idl/pump_amm.json"
+
+[sample]
+seed = 20261007
+grads = 2500
+non = 5000
+max_pages = 5
+
+[urls]
+pf = "https://frontend-api-v3.pump.fun/coins-v2/"
+dex = "https://api.dexscreener.com/tokens/v1/solana/"
+gecko = "https://api.geckoterminal.com/api/v2/networks/solana/tokens/"
