@@ -271,6 +271,11 @@ def snap():
         lambda con, res: con.executemany("INSERT OR REPLACE INTO snap VALUES(?,?,?,?,?,?,?)", res), every=100, workers=4)
 
 
+def report():
+    import report as r
+    r.main()
+
+
 def count():
     con = db()
     for t in ("creates", "migr", "curves", "sample", "trades", "meta", "snap"):
