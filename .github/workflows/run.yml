@@ -1,0 +1,59 @@
+name: run
+
+on:
+  workflow_dispatch:
+    inputs:
+      tasks:
+        description: "space-separated pf.py tasks"
+        default: "smoke"
+
+permissions:
+  contents: write
+  issues: write
+
+concurrency:
+  group: run
+  cancel-in-progress: false
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+    env:
+      GH_TOKEN: ${{ github.token }}
+      HELIUS_KEY: ${{ secrets.HELIUS_KEY }}
+      TASKS: ${{ inputs.tasks }}
+      MAX_MIN: "300"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: restore db
+        run: |
+          gh release download data --pattern 'pf.db.zst*' || true
+          if ls pf.db.zst.part-* >/dev/null 2>&1; then cat pf.db.zst.part-* > pf.db.zst && rm pf.db.zst.part-*; fi
+          if [ -f pf.db.zst ]; then zstd -d --rm --long=27 pf.db.zst; else echo "no previous db"; fi
+      - name: run
+        run: |
+          fail=0
+          for t in $TASKS; do python pf.py $t || fail=1; done
+          python pf.py count | tee -a "$GITHUB_STEP_SUMMARY"
+          exit $fail
+      - name: publish db
+        if: always()
+        run: |
+          [ -f pf.db ] || exit 0
+          sqlite3 pf.db "PRAGMA wal_checkpoint(TRUNCATE);"
+          zstd -12 -T0 --long=27 -f pf.db -o pf.db.zst
+          split -b 1900M -d pf.db.zst pf.db.zst.part- && rm pf.db.zst
+          ls -la pf.db pf.db.zst.part-* | tee -a "$GITHUB_STEP_SUMMARY"
+          gh release view data >/dev/null 2>&1 || gh release create data --title data --notes "pf dataset"
+          gh release upload data pf.db.zst.part-* --clobber
+          for a in $(gh release view data --json assets --jq '.assets[].name'); do [ -f "$a" ] || gh release delete-asset data "$a" -y; done
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: out
+          path: out/
+          if-no-files-found: ignore
