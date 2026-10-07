@@ -91,11 +91,16 @@ def sampled(con, U):
         if mint in U:
             S[mint] = {"stratum": stratum, "capped": capped, "cfee": 0, "buy": 0, "sell": 0, "create_buy": 0,
                        "n_curve": 0, "n_amm": 0, "same_slot": 0, "buyers": set(), "dev_tok": 0}
+    wal = defaultdict(lambda: defaultdict(lambda: [0, 0, 0, 0]))
     for mint, ts, slot, user, buy, q, tok, fee, cfee, venue in con.execute("SELECT * FROM trades"):
         s = S.get(mint)
         if s is None:
             continue
         u = U[mint]
+        w = wal[mint][user]
+        w[0] += 1
+        w[1 if buy else 2] += q
+        w[3] += cfee
         dev = user in (u["creator"], u["payer"])
         s["cfee"] += cfee
         s["n_curve" if venue == 0 else "n_amm"] += 1
@@ -112,6 +117,17 @@ def sampled(con, U):
                 s["dev_tok"] -= tok
         elif slot == u["slot"]:
             s["same_slot"] += 1
+    seen = Counter(w for m in wal for w in wal[m])
+    for mint, s in S.items():
+        u, strict, bot = U[mint], 0, 0
+        for w, (n, bq, sq, cf) in wal[mint].items():
+            if w in (u["creator"], u["payer"]):
+                continue
+            if seen[w] >= 2 or n <= 3 or bq + sq == 0 or abs(bq - sq) / (bq + sq) > 0.5:
+                strict += cf
+            else:
+                bot += cf
+        s["cfee_strict"], s["cfee_botlike"] = strict, bot
     meta = {r[0]: r for r in con.execute("SELECT * FROM meta")}
     images = Counter(r[6] for r in meta.values() if r[6])
     snap = {r[0]: r for r in con.execute("SELECT * FROM snap")}
@@ -123,6 +139,7 @@ def sampled(con, U):
         s["cfee_sol"] = s["cfee"] / LAM
         s["net"] = (s["cfee"] + s["sell"] - s["buy"] - cost) / LAM if cost is not None else None
         s["fee_net"] = (s["cfee"] - cost) / LAM if cost is not None else None
+        s["fee_net_strict"] = (s["cfee_strict"] - cost) / LAM if cost is not None else None
         s["organic"] = u["organic_u"] and s["n_curve"] > 5 and s["same_slot"] < 3
         m = meta.get(mint)
         s["meta_ok"] = bool(m and m[1])
@@ -342,15 +359,20 @@ def main():
         for split in ("train", "test", "all"):
             Ls = lambda u, L=L, split=split: L(u) and (not u["grad"] or u["organic_u"]) and (split == "all" or u["test"] == (split == "test"))
             Mlow = lambda s, M=M: (M is None or M(s)) and (s["stratum"] == "n" or s["organic"])
-            row[split] = {"upper": estimate(U, S, Ls, M, fee_net), "lower": estimate(U, S, Ls, Mlow, fee_net)}
+            row[split] = {"upper": estimate(U, S, Ls, M, fee_net), "lower": estimate(U, S, Ls, Mlow, fee_net),
+                          "strict_lower": estimate(U, S, Ls, Mlow, lambda s: s["fee_net_strict"])}
         t = row["test"]["lower"]
         row["gate_pass_lower"] = bool(t and t["mean"] > 0 and (t["t"] or 0) > 2 and t["est_launches"] >= 300)
         t = row["test"]["upper"]
         row["gate_pass_upper"] = bool(t and t["mean"] > 0 and (t["t"] or 0) > 2 and t["est_launches"] >= 300)
+        t = row["test"]["strict_lower"]
+        row["gate_pass_strict"] = bool(t and t["mean"] > 0 and (t["t"] or 0) > 2 and t["est_launches"] >= 300)
         R["legit_fee_only"][name] = row
     og = [s for s in S.values() if s["stratum"] == "g" and s["organic"]]
     R["organic_grads"] = {"n": len(og), "capped": sum(s["capped"] or 0 for s in og),
                           "fee_sol_mean": round(sum(s["cfee_sol"] for s in og) / max(1, len(og)), 4),
+                          "strict_fee_sol_mean": round(sum(s["cfee_strict"] for s in og) / LAM / max(1, len(og)), 4),
+                          "botlike_fee_share": round(sum(s["cfee_botlike"] for s in og) / max(1, sum(s["cfee"] for s in og)), 4),
                           "fee_sol_sorted": sorted(round(s["cfee_sol"], 3) for s in og)}
 
     dur = defaultdict(Counter)
@@ -365,6 +387,9 @@ def main():
             dur[key][f"mcap_ge_{int(th / 1000)}k"] += (mc or 0) >= th
         dur[key]["ath_ge_100k"] += (s.get("ath") or 0) >= 100e3
     R["durability_graduates"] = {k: dict(v) for k, v in dur.items()}
+    nn = [s for m, s in S.items() if s["stratum"] == "n" and U[m]["sol"]]
+    R["nongrad_fee_split"] = {"n": len(nn), "botlike_share": round(sum(s["cfee_botlike"] for s in nn) / max(1, sum(s["cfee"] for s in nn)), 4),
+                              "dev_share": round(1 - sum(s["cfee_strict"] + s["cfee_botlike"] for s in nn) / max(1, sum(s["cfee"] for s in nn)), 4)}
     R["dev_still_holding_share"] = round(sum(1 for s in S.values() if s["dev_tok"] > 0) / max(1, len(S)), 4)
     (OUT / "report.json").write_text(json.dumps(R, indent=1, default=str))
     print(json.dumps(R, indent=1, default=str))
