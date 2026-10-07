@@ -171,29 +171,15 @@ def curves():
         lambda con, res: con.executemany("INSERT OR REPLACE INTO curves VALUES(?,?,?,?,?,?)", res), rpc, every=500)
 
 
-def early():
-    rpc, con = Rpc(), db()
-    rows = con.execute("""SELECT c.mint, c.ts, c.slot, c.sig, m.ts FROM creates c JOIN curves k USING(mint)
-        LEFT JOIN migr m USING(mint) WHERE k.complete=1 AND c.dev_q < 84000000000
-        AND NOT (c.mayhem=1 AND COALESCE(m.quote_amt, 0) < 10000000000)
-        AND c.mint NOT IN (SELECT mint FROM early)""").fetchall()
-
-    def job(r):
-        mint, ts, slot, sig, gts = r
-        d = next(rpc.gtfa(mint, full=False))
-        same = sum(1 for x in d if x.get("slot") == slot and x.get("signature") != sig)
-        pre = sum(1 for x in d if gts and (x.get("blockTime") or 0) <= gts)
-        first = sum(1 for x in d if (x.get("blockTime") or 0) <= ts + 10)
-        return mint, len(d), int(len(d) >= 1000), same, pre, first
-
-    run("early", job, rows, lambda con, res: con.execute("INSERT OR REPLACE INTO early VALUES(?,?,?,?,?,?)", res), rpc)
-
-
 def sample():
     con = db()
     if con.execute("SELECT COUNT(*) FROM sample").fetchone()[0]:
         print("sample exists")
         return
+    days = con.execute("SELECT COUNT(*) FROM done WHERE task='ledger'").fetchone()[0]
+    missing = con.execute("SELECT COUNT(*) FROM creates WHERE mint NOT IN (SELECT mint FROM curves)").fetchone()[0]
+    if days < len(DAYS) or missing:
+        sys.exit(f"sample blocked: ledger days {days}/{len(DAYS)}, curves missing {missing:,}")
     rnd = random.Random(S["seed"])
     grads = [m for (m,) in con.execute("SELECT mint FROM curves WHERE complete=1 ORDER BY mint")]
     non = [m for (m,) in con.execute("SELECT mint FROM curves WHERE complete=0 ORDER BY mint")]
@@ -236,22 +222,34 @@ def trades():
 
 
 def meta():
-    http, con = Http(CFG["http"]["pf_rps"]), db()
+    pf_http, ipfs, con = Http(CFG["http"]["pf_rps"]), Http(CFG["http"]["ipfs_rps"]), db()
     rows = con.execute("SELECT s.mint, c.uri FROM sample s JOIN creates c USING(mint) WHERE s.mint NOT IN (SELECT mint FROM meta)").fetchall()
+
+    def uri_json(uri):
+        if not uri or not uri.startswith("http"):
+            return {}
+        urls = [uri]
+        if "/ipfs/" in uri:
+            urls += [g + uri.split("/ipfs/", 1)[1] for g in U["gateways"] if not uri.startswith(g)]
+        for u in urls:
+            j = ipfs.get(u, tries=2, timeout=20)
+            if isinstance(j, dict):
+                return j
+        return {}
 
     def job(r):
         mint, uri = r
-        j, ok = http.get(U["pf"] + mint), 1
-        if not isinstance(j, dict):
-            j, ok = (http.get(uri) if uri and uri.startswith("http") else None), 2
-        if not isinstance(j, dict):
-            return (mint, 0) + (None,) * 8
-        desc = j.get("description") or ""
-        return (mint, ok, int(bool(j.get("twitter"))), int(bool(j.get("telegram"))), int(bool(j.get("website"))),
-                len(desc), j.get("image_uri") or j.get("image"), j.get("ath_market_cap"), j.get("reply_count"), desc[:500])
+        p = pf_http.get(U["pf"] + mint)
+        p = p if isinstance(p, dict) else {}
+        m = uri_json(uri)
+        ok = (1 if p else 0) | (2 if m else 0)
+        desc = m.get("description") or ""
+        return (mint, ok, int(bool(p.get("twitter") or m.get("twitter"))), int(bool(m.get("telegram"))),
+                int(bool(p.get("website") or m.get("website"))), len(desc), p.get("image_uri") or m.get("image"),
+                p.get("ath_market_cap"), p.get("reply_count"), desc[:500])
 
     run("meta", job, rows, lambda con, res: con.execute("INSERT OR REPLACE INTO meta VALUES(?,?,?,?,?,?,?,?,?,?)", res),
-        every=250, workers=2)
+        every=250, workers=4)
 
 
 def snap():
@@ -275,7 +273,7 @@ def snap():
 
 def count():
     con = db()
-    for t in ("creates", "migr", "curves", "early", "sample", "trades", "meta", "snap"):
+    for t in ("creates", "migr", "curves", "sample", "trades", "meta", "snap"):
         print(t, con.execute(f"SELECT COUNT(*) FROM {t}").fetchone()[0])
     print("ledger days", [day_str(int(k)) for (k,) in con.execute("SELECT key FROM done WHERE task='ledger' ORDER BY key")])
 
