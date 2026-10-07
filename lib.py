@@ -27,7 +27,6 @@ CREATE TABLE IF NOT EXISTS creates(
   payer_delta INTEGER, tx_fee INTEGER);
 CREATE TABLE IF NOT EXISTS migr(mint TEXT PRIMARY KEY, ts INTEGER, sig TEXT, quote_amt INTEGER, pool TEXT, quote TEXT);
 CREATE TABLE IF NOT EXISTS curves(mint TEXT PRIMARY KEY, complete INTEGER, vq INTEGER, rq INTEGER, rt INTEGER, creator TEXT);
-CREATE TABLE IF NOT EXISTS early(mint TEXT PRIMARY KEY, n INTEGER, capped INTEGER, same_slot INTEGER, pre_grad INTEGER, first10 INTEGER);
 CREATE TABLE IF NOT EXISTS sample(mint TEXT PRIMARY KEY, stratum TEXT, pages INTEGER, capped INTEGER);
 CREATE TABLE IF NOT EXISTS trades(
   mint TEXT, ts INTEGER, slot INTEGER, user TEXT, buy INTEGER, q INTEGER, tok INTEGER, fee INTEGER, cfee INTEGER, venue INTEGER);
@@ -90,11 +89,11 @@ class Http:
     def __init__(self, rps):
         self.lim = Limiter(rps)
 
-    def get(self, url):
-        for attempt in range(6):
+    def get(self, url, tries=6, timeout=60):
+        for attempt in range(tries):
             self.lim.wait()
             try:
-                return fetch(urllib.request.Request(url, headers=UA), 60)
+                return fetch(urllib.request.Request(url, headers=UA), timeout)
             except urllib.error.HTTPError as e:
                 if e.code not in (429, 500, 502, 503, 504, 520, 522, 530):
                     return None
