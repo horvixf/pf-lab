@@ -89,7 +89,7 @@ def sampled(con, U):
     S = {}
     for mint, stratum, capped in con.execute("SELECT mint, stratum, capped FROM sample WHERE pages IS NOT NULL"):
         if mint in U:
-            S[mint] = {"stratum": stratum, "capped": capped, "cfee": 0, "buy": 0, "sell": 0, "create_buy": 0,
+            S[mint] = {"stratum": stratum, "capped": capped, "cfee": 0, "buy": 0, "sell": 0, "create_buy": 0, "pre_buy": 0,
                        "n_curve": 0, "n_amm": 0, "same_slot": 0, "buyers": set(), "dev_tok": 0}
     wal = defaultdict(lambda: defaultdict(lambda: [0, 0, 0, 0]))
     for mint, ts, slot, user, buy, q, tok, fee, cfee, venue in con.execute("SELECT * FROM trades"):
@@ -110,6 +110,8 @@ def sampled(con, U):
             if buy:
                 s["buy"] += q + fee + cfee
                 s["dev_tok"] += tok
+                if u["gsec"] is None or ts <= u["ts"] + u["gsec"]:
+                    s["pre_buy"] += q
                 if slot == u["slot"]:
                     s["create_buy"] += q + fee + cfee
             else:
@@ -141,6 +143,7 @@ def sampled(con, U):
         s["fee_net"] = (s["cfee"] - cost) / LAM if cost is not None else None
         s["fee_net_strict"] = (s["cfee_strict"] - cost) / LAM if cost is not None else None
         s["organic"] = u["organic_u"] and s["n_curve"] > 5 and s["same_slot"] < 3
+        s["organic2"] = s["organic"] and s["pre_buy"] <= LAM
         m = meta.get(mint)
         s["meta_ok"] = bool(m and m[1])
         if s["meta_ok"]:
@@ -275,7 +278,7 @@ def main():
     R["time_to_grad_min"] = {k: round(gs[int(q * (len(gs) - 1))] / 60, 2) for k, q in (("p10", .1), ("p25", .25), ("p50", .5), ("p75", .75), ("p90", .9))} if gs else None
 
     feats = {
-        "dev_buy_sol": lambda u: bucket(u["dev"], [0, 0.1, 0.5, 1, 3, 84], ["0", "<0.1", "0.1-0.5", "0.5-1", "1-3", "3-84", ">=84"]) if u["dev"] is not None else None,
+        "dev_buy_sol": lambda u: ("0" if u["dev"] == 0 else bucket(u["dev"], [0.1, 0.5, 1, 3, 84], ["<0.1", "0.1-0.5", "0.5-1", "1-3", "3-84", ">=84"])) if u["dev"] is not None else None,
         "creator_launches": lambda u: bucket(u["launches"], [2, 5, 20, 100], ["1", "2-4", "5-19", "20-99", "100+"]),
         "copycat_24h": lambda u: u["copycat"],
         "hour_utc": lambda u: bucket(u["hour"], [6, 12, 18], ["00-05", "06-11", "12-17", "18-23"]),
@@ -368,9 +371,30 @@ def main():
         t = row["test"]["strict_lower"]
         row["gate_pass_strict"] = bool(t and t["mean"] > 0 and (t["t"] or 0) > 2 and t["est_launches"] >= 300)
         R["legit_fee_only"][name] = row
+    strict = lambda s: s["fee_net_strict"]
+    rob = {}
+    for name, L in (("S1", base), ("S1_dev0", lambda u: base(u) and u["dev"] == 0), ("S2", base)):
+        M = (lambda s: s.get("meta_ok") and s["twitter"] and s["website"]) if name == "S2" else None
+        for split in ("all", "test"):
+            Ls = lambda u, L=L, split=split: L(u) and (not u["grad"] or u["organic_u"]) and (split == "all" or u["test"])
+            M2 = lambda s, M=M: (M is None or M(s)) and (s["stratum"] == "n" or s["organic2"])
+            rob[f"{name}_{split}_organic2"] = estimate(U, S, Ls, M2, strict)
+            og2 = sorted((s["cfee_strict"], m) for m, s in S.items() if s["stratum"] == "g" and s["organic2"] and Ls(U[m]))
+            ng = sorted((s["cfee_strict"], m) for m, s in S.items() if s["stratum"] == "n" and Ls(U[m]))
+            tot_ng = sum(v for v, _ in ng) or 1
+            rob[f"{name}_{split}_nongrad_top_share"] = {k: round(sum(v for v, _ in ng[-k:]) / tot_ng, 3) for k in (1, 5, 10)}
+            for k_g, k_n in ((1, 0), (3, 0), (0, 5), (3, 5)):
+                drop = {m for _, m in og2[-k_g:]} if k_g else set()
+                drop |= {m for _, m in ng[-k_n:]} if k_n else set()
+                S2_ = {m: s for m, s in S.items() if m not in drop}
+                rob[f"{name}_{split}_drop_g{k_g}_n{k_n}"] = estimate(U, S2_, Ls, M2, strict, boot=300)
+    R["robust"] = {k: (v if not isinstance(v, dict) or "mean" not in v else
+                       {x: v[x] for x in ("mean", "se", "t", "ci95", "mean_by_stratum", "grad_share", "est_launches", "n_sampled")})
+                   for k, v in rob.items()}
     og = [s for s in S.values() if s["stratum"] == "g" and s["organic"]]
     R["organic_grads"] = {"n": len(og), "capped": sum(s["capped"] or 0 for s in og),
                           "fee_sol_mean": round(sum(s["cfee_sol"] for s in og) / max(1, len(og)), 4),
+                          "organic2": sum(s["organic2"] for s in og),
                           "strict_fee_sol_mean": round(sum(s["cfee_strict"] for s in og) / LAM / max(1, len(og)), 4),
                           "botlike_fee_share": round(sum(s["cfee_botlike"] for s in og) / max(1, sum(s["cfee"] for s in og)), 4),
                           "fee_sol_sorted": sorted(round(s["cfee_sol"], 3) for s in og)}
