@@ -11,6 +11,7 @@ workers = 8
 [http]
 pf_rps = 0.9
 dex_rps = 4
+ipfs_rps = 5
 
 [addr]
 pump = "6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P"
@@ -25,7 +26,7 @@ amm = "https://raw.githubusercontent.com/pump-fun/pump-public-docs/cb188ce08b506
 
 [sample]
 seed = 20261007
-grads = 2500
+grads = 1500
 non = 5000
 max_pages = 5
 
@@ -33,3 +34,4 @@ max_pages = 5
 pf = "https://frontend-api-v3.pump.fun/coins-v2/"
 dex = "https://api.dexscreener.com/tokens/v1/solana/"
 gecko = "https://api.geckoterminal.com/api/v2/networks/solana/tokens/"
+gateways = ["https://ipfs.io/ipfs/", "https://dweb.link/ipfs/", "https://gateway.pinata.cloud/ipfs/"]
