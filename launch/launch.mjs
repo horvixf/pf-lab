@@ -4,8 +4,9 @@ import {
   ComputeBudgetProgram, Connection, Keypair, LAMPORTS_PER_SOL, PublicKey, SystemProgram,
   TransactionMessage, VersionedTransaction,
 } from "@solana/web3.js";
-import { OnlinePumpSdk, PUMP_PROGRAM_ID, PUMP_SDK } from "@pump-fun/pump-sdk";
+import { createRequire } from "node:module";
 
+const { OnlinePumpSdk, PUMP_PROGRAM_ID, PUMP_SDK } = createRequire(import.meta.url)("@pump-fun/pump-sdk");
 const CFG = JSON.parse(readFileSync(new URL("./coins.json", import.meta.url)));
 const conn = new Connection(process.env.RPC_URL || CFG.rpc, "confirmed");
 const [task, arg = "", confirm = ""] = process.argv.slice(2);
