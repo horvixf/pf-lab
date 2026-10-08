@@ -122,11 +122,13 @@ def sampled(con, U):
     seen = Counter(w for m in wal for w in wal[m])
     for mint, s in S.items():
         u, strict, bot = U[mint], 0, 0
+        s["strict_w"] = {}
         for w, (n, bq, sq, cf) in wal[mint].items():
             if w in (u["creator"], u["payer"]):
                 continue
             if seen[w] >= 2 or n <= 3 or bq + sq == 0 or abs(bq - sq) / (bq + sq) > 0.5:
                 strict += cf
+                s["strict_w"][w] = cf
             else:
                 bot += cf
         s["cfee_strict"], s["cfee_botlike"] = strict, bot
@@ -203,6 +205,47 @@ def estimate(U, S, L, M=None, f=None, boot=BOOT):
             "mean_by_stratum": {st: round(sum(parts[st][1]) / len(parts[st][1]), 5) for st in parts if parts[st][1]},
             "est_launches": round(size_g + size_n), "grad_share": round(size_g / (size_g + size_n), 4) if size_g + size_n else None,
             "n_sampled": {st: len(parts[st][1]) for st in parts}}
+
+
+def funding(con, U, S):
+    tg = con.execute("SELECT mint, addr, role, cfee FROM targets").fetchall()
+    fund = {a: f for a, f, *_ in con.execute("SELECT * FROM funding")}
+    if not tg or not fund:
+        return None
+    coins = defaultdict(list)
+    deg = defaultdict(set)
+    for m, a, role, cf in tg:
+        coins[m].append((a, role, cf))
+        if role == "trader" and fund.get(a):
+            deg[fund[a]].add(m)
+    hubs = {f for f, ms in deg.items() if len(ms) >= CFG["fund"]["hub_coins"]}
+    rows, agg = [], {st: Counter() for st in ("g", "n")}
+    for m, items in coins.items():
+        u, s = U[m], S[m]
+        dev = {u["creator"], u["payer"]}
+        dev_f = {fund.get(u["creator"]), fund.get(u["payer"])} - {None}
+        c = Counter()
+        for a, role, cf in items:
+            if role != "trader":
+                continue
+            f = fund.get(a)
+            kind = "direct" if f in dev else "hub" if f in hubs else "sibling" if f and f in dev_f else "traced" if f else "unknown"
+            c[kind] += cf
+            c["top"] += cf
+            if kind in ("direct", "sibling") and a in s["strict_w"]:
+                c["strict_linked"] += cf
+        s["cfee_strict_adj"] = s["cfee_strict"] - c["strict_linked"]
+        c["all"] = s["cfee"]
+        agg[s["stratum"]].update(c)
+        rows.append((m, s["stratum"], dict(c)))
+    share = {st: {k: round(v / max(1, a["all"]), 4) for k, v in a.items() if k != "all"} | {"coins": sum(1 for r in rows if r[1] == st)}
+             for st, a in agg.items()}
+    hub_fee = Counter()
+    for m, a, role, cf in tg:
+        if role == "trader" and fund.get(a) in hubs:
+            hub_fee[fund[a]] += cf
+    return {"share_of_coin_fees": share, "hubs": [(h, len(deg[h]), round(v / LAM, 3)) for h, v in hub_fee.most_common(15)],
+            "funded_found": sum(1 for v in fund.values() if v), "addresses": len(fund)}
 
 
 def logit(rows, names, iters=25):
@@ -391,6 +434,19 @@ def main():
     R["robust"] = {k: (v if not isinstance(v, dict) or "mean" not in v else
                        {x: v[x] for x in ("mean", "se", "t", "ci95", "mean_by_stratum", "grad_share", "est_launches", "n_sampled")})
                    for k, v in rob.items()}
+    R["funding"] = funding(con, U, S)
+    if R["funding"]:
+        for s in S.values():
+            s.setdefault("cfee_strict_adj", s["cfee_strict"])
+            s["fee_net_adj"] = (s["cfee_strict_adj"] - s["cost"] * LAM) / LAM if s["cost"] is not None else None
+        adj = lambda s: s["fee_net_adj"]
+        R["funding"]["adjusted"] = {}
+        for name, L, M in (("S1", base, None), ("S2", base, lambda s: s.get("meta_ok") and s["twitter"] and s["website"])):
+            for split in ("all", "test"):
+                Ls = lambda u, L=L, split=split: L(u) and (not u["grad"] or u["organic_u"]) and (split == "all" or u["test"])
+                M2 = lambda s, M=M: (M is None or M(s)) and (s["stratum"] == "n" or s["organic2"])
+                e = estimate(U, S, Ls, M2, adj)
+                R["funding"]["adjusted"][f"{name}_{split}"] = e and {x: e[x] for x in ("mean", "se", "t", "ci95", "mean_by_stratum", "grad_share", "n_sampled")}
     og = [s for s in S.values() if s["stratum"] == "g" and s["organic"]]
     R["organic_grads"] = {"n": len(og), "capped": sum(s["capped"] or 0 for s in og),
                           "fee_sol_mean": round(sum(s["cfee_sol"] for s in og) / max(1, len(og)), 4),
