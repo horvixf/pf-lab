@@ -11,28 +11,28 @@
    "name": "Laundry Goblin",
    "symbol": "LNDRYGOB",
    "description": "The goblin behind every missing sock. A memecoin for fun only: no roadmap, no team allocation, no promises.",
-   "uri": "pending"
+   "uri": "https://raw.githubusercontent.com/horvixf/coins/46a28384fba1664ca9fe0ef2e53c50b1230cbe42/laundry-goblin/meta.json"
   },
   {
    "id": "lag-llama",
    "name": "Lag Llama",
    "symbol": "LAGLAMA",
    "description": "Always two seconds late, never in a hurry. A memecoin for fun only: no roadmap, no team allocation, no promises.",
-   "uri": "pending"
+   "uri": "https://raw.githubusercontent.com/horvixf/coins/46a28384fba1664ca9fe0ef2e53c50b1230cbe42/lag-llama/meta.json"
   },
   {
    "id": "office-fern",
    "name": "Office Fern",
    "symbol": "OFCFERN",
    "description": "Survived three reorgs and a coffee spill. A memecoin for fun only: no roadmap, no team allocation, no promises.",
-   "uri": "pending"
+   "uri": "https://raw.githubusercontent.com/horvixf/coins/46a28384fba1664ca9fe0ef2e53c50b1230cbe42/office-fern/meta.json"
   },
   {
    "id": "snooze-owl",
    "name": "Snooze Owl",
    "symbol": "SNOOZOWL",
    "description": "Five more minutes. A memecoin for fun only: no roadmap, no team allocation, no promises.",
-   "uri": "pending"
+   "uri": "https://raw.githubusercontent.com/horvixf/coins/46a28384fba1664ca9fe0ef2e53c50b1230cbe42/snooze-owl/meta.json"
   }
  ]
 }
