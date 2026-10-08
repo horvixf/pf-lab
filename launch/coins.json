@@ -1,0 +1,11 @@
+{
+ "rpc": "https://api.mainnet-beta.solana.com",
+ "lookup_table": "7mFD2mUtRS65XstiSAvCJuYmdesZoQwCwRJhq1p3eRMe",
+ "cu_limit": 150000,
+ "cu_price": 100000,
+ "start_balance_sol": 0,
+ "max_spend_sol": 0.04,
+ "coins": [
+  {"id": "dry-test", "name": "Dry Test", "symbol": "DRYT", "uri": "https://example.com/dry-test.json"}
+ ]
+}
