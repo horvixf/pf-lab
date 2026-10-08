@@ -17,6 +17,9 @@ on:
     - cron: "40 19 * * *"
     - cron: "40 20 * * *"
     - cron: "40 21 * * *"
+    - cron: "40 19 * * *"
+    - cron: "40 20 * * *"
+    - cron: "40 21 * * *"
 
 permissions:
   contents: read
