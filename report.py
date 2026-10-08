@@ -255,6 +255,30 @@ def funding(con, U, S):
             "funded_found": sum(1 for v in fund.values() if v), "addresses": len(fund)}
 
 
+def bench(con, U, S, cutoff):
+    H = (3600, 86400, 259200)
+    sel = {}
+    for m, s in S.items():
+        u = U[m]
+        if s["stratum"] == "n" and u["plain"] and (u["dev"] or 0) <= 0.1 and u["launches"] <= 4:
+            sel[m] = ("s2" if s.get("meta_ok") and s["twitter"] and s["website"] else "s1_other", [0] * len(H))
+    for mint, ts, user, cfee in con.execute("SELECT mint, ts, user, cfee FROM trades"):
+        r = sel.get(mint)
+        if r and user in S[mint]["strict_w"]:
+            dt = ts - U[mint]["ts"]
+            for i, h in enumerate(H):
+                if dt <= h:
+                    r[1][i] += cfee
+    out = {}
+    for grp in ("s2", "s1_other"):
+        for i, h in enumerate(H):
+            v = sorted(r[1][i] / LAM for m, r in sel.items() if r[0] == grp and U[m]["ts"] + h <= cutoff)
+            if v:
+                out[f"{grp}_{h // 3600}h"] = {"n": len(v), "pos": round(sum(x > 0 for x in v) / len(v), 3),
+                                              **{f"p{q}": round(v[int(q / 100 * (len(v) - 1))], 6) for q in (10, 25, 50, 75, 90)}}
+    return out
+
+
 def logit(rows, names, iters=25):
     k = len(names)
     beta = [0.0] * k
@@ -464,6 +488,8 @@ def main():
             rep[name + "_pass"] = bool(e and e["mean"] > 0 and (e["t"] or 0) > Rc["t_pass"])
             rep[name + "_pass_robust"] = bool(d and d["mean"] > 0 and (d["t"] or 0) > Rc["t_pass"])
         R["replication"] = rep
+        R["bench_rep"] = bench(con, Ur, Sr, ts_of("2026-10-08T11:00:00"))
+    R["bench_a"] = bench(con, U, S, ts_of("2026-10-07T16:00:00"))
     R["funding"] = funding(con, U, S)
     if R["funding"]:
         for s in S.values():
