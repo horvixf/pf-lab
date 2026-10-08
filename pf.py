@@ -271,6 +271,43 @@ def snap():
         lambda con, res: con.executemany("INSERT OR REPLACE INTO snap VALUES(?,?,?,?,?,?,?)", res), every=100, workers=4)
 
 
+def fund():
+    import report as rp
+    F, con = CFG["fund"], db()
+    if not con.execute("SELECT COUNT(*) FROM targets").fetchone()[0]:
+        U = rp.universe(con)
+        S = rp.sampled(con, U)
+        small = lambda u: u["plain"] and (u["dev"] or 0) <= 0.1 and u["launches"] <= 4
+        grads = [m for m, s in S.items() if s["stratum"] == "g" and s["organic2"]]
+        non = sorted(((s["cfee_strict"], m) for m, s in S.items() if s["stratum"] == "n" and small(U[m])), reverse=True)
+        con.execute("CREATE INDEX IF NOT EXISTS trades_mint ON trades(mint)")
+        rows = []
+        for m in grads + [m for _, m in non[:F["top_nongrads"]]]:
+            u = U[m]
+            rows += [(m, u["creator"], "creator", 0, 0), (m, u["payer"], "payer", 0, 0)]
+            rows += [(m, a, "trader", cf, n) for a, cf, n in con.execute(
+                "SELECT user, SUM(cfee), COUNT(*) FROM trades WHERE mint=? AND user NOT IN (?,?) GROUP BY user ORDER BY SUM(cfee) DESC LIMIT ?",
+                (m, u["creator"], u["payer"], F["top_wallets"]))]
+        con.executemany("INSERT OR IGNORE INTO targets VALUES(?,?,?,?,?)", rows)
+        con.commit()
+        status("fund", f"targets: {len(grads)} organic graduates, {min(len(non), F['top_nongrads'])} non-graduates, {len(rows):,} rows")
+    rpc = Rpc()
+    addrs = [a for (a,) in con.execute("SELECT DISTINCT addr FROM targets WHERE addr NOT IN (SELECT addr FROM funding)")]
+
+    def job(a):
+        for tx in next(rpc.gtfa(a, limit=10)):
+            m = tx["meta"]
+            la = m.get("loadedAddresses") or {}
+            keys = tx["transaction"]["message"]["accountKeys"] + la.get("writable", []) + la.get("readonly", [])
+            if a in keys:
+                i = keys.index(a)
+                if m["preBalances"][i] == 0 and m["postBalances"][i] > 0 and keys[0] != a:
+                    return a, keys[0], tx["blockTime"], tx["transaction"]["signatures"][0], m["postBalances"][i]
+        return a, None, None, None, None
+
+    run("fund", job, addrs, lambda con, r: con.execute("INSERT OR REPLACE INTO funding VALUES(?,?,?,?,?)", r), rpc, every=100)
+
+
 def report():
     import report as r
     r.main()
