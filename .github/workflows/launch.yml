@@ -1,0 +1,53 @@
+name: launch
+
+on:
+  workflow_dispatch:
+    inputs:
+      task:
+        description: "address | dry | preview | send | claim_preview | claim | sweep_preview | sweep | status | lock"
+        default: "status"
+      arg:
+        description: "coin id or address"
+        default: ""
+      confirm:
+        description: "preview code (send tasks) or payer address (dry)"
+        default: ""
+
+permissions:
+  contents: read
+
+concurrency:
+  group: launch
+  cancel-in-progress: false
+
+jobs:
+  launch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: launch
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: "22"
+      - name: lock
+        if: inputs.task == 'lock'
+        run: npm install --package-lock-only --ignore-scripts
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: inputs.task == 'lock'
+        with:
+          name: lock
+          path: launch/package-lock.json
+      - name: run
+        if: inputs.task != 'lock'
+        run: npm ci --ignore-scripts --no-audit --no-fund && node launch.mjs "$TASK" "$ARG" "$CONFIRM"
+        env:
+          TASK: ${{ inputs.task }}
+          ARG: ${{ inputs.arg }}
+          CONFIRM: ${{ inputs.confirm }}
+          LAUNCH_KEY: ${{ secrets.LAUNCH_KEY }}
+          MINT_SEED: ${{ secrets.MINT_SEED }}
+          OLD_KEY: ${{ startsWith(inputs.task, 'sweep') && secrets.OLD_KEY || '' }}
+          RPC_URL: ${{ secrets.RPC_URL }}
