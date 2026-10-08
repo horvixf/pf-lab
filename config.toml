@@ -30,6 +30,11 @@ grads = 1500
 non = 5000
 max_pages = 5
 
+[fund]
+top_wallets = 8
+top_nongrads = 30
+hub_coins = 5
+
 [urls]
 pf = "https://frontend-api-v3.pump.fun/coins-v2/"
 dex = "https://api.dexscreener.com/tokens/v1/solana/"
