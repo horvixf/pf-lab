@@ -330,6 +330,15 @@ def fund():
     run("fund", job, addrs, lambda con, r: con.execute("INSERT OR REPLACE INTO funding VALUES(?,?,?,?,?)", r), rpc, every=100)
 
 
+def namecheck():
+    con = db()
+    for c in json.loads((Path(__file__).parent / "launch" / "coins.json").read_text())["coins"]:
+        n = con.execute("SELECT COUNT(*), MAX(ts) FROM creates WHERE lower(trim(name)) = ?", (c["name"].lower().strip(),)).fetchone()
+        sym = con.execute("SELECT COUNT(*) FROM creates WHERE lower(trim(symbol)) = ?", (c["symbol"].lower().strip(),)).fetchone()[0]
+        part = con.execute("SELECT COUNT(*) FROM creates WHERE lower(name) LIKE ?", (f"%{c['name'].lower().split()[-1]}%",)).fetchone()[0]
+        print(f"{c['id']}: name matches {n[0]}, symbol matches {sym}, names containing '{c['name'].split()[-1]}' {part}", flush=True)
+
+
 def report():
     import report as r
     r.main()
