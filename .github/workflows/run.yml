@@ -6,6 +6,8 @@ on:
       tasks:
         description: "space-separated pf.py tasks"
         default: "smoke"
+  schedule:
+    - cron: "0 20 21 10 *"
 
 permissions:
   contents: write
@@ -22,7 +24,7 @@ jobs:
     env:
       GH_TOKEN: ${{ github.token }}
       HELIUS_KEY: ${{ secrets.HELIUS_KEY }}
-      TASKS: ${{ inputs.tasks }}
+      TASKS: ${{ inputs.tasks || 'own' }}
       MAX_MIN: "300"
     steps:
       - uses: actions/checkout@v4
