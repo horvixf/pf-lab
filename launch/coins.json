@@ -7,9 +7,9 @@
  "max_spend_sol": 0.04,
  "coins": [
   {
-   "id": "sock-goblin",
-   "name": "Sock Goblin",
-   "symbol": "SOCKGOB",
+   "id": "laundry-goblin",
+   "name": "Laundry Goblin",
+   "symbol": "LNDRYGOB",
    "description": "The goblin behind every missing sock. A memecoin for fun only: no roadmap, no team allocation, no promises.",
    "uri": "pending"
   },
@@ -30,7 +30,7 @@
   {
    "id": "snooze-owl",
    "name": "Snooze Owl",
-   "symbol": "SNOWL",
+   "symbol": "SNOOZOWL",
    "description": "Five more minutes. A memecoin for fun only: no roadmap, no team allocation, no promises.",
    "uri": "pending"
   }
