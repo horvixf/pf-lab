@@ -14,6 +14,9 @@ on:
         default: ""
   schedule:
     - cron: "40 18 * * *"
+    - cron: "40 19 * * *"
+    - cron: "40 20 * * *"
+    - cron: "40 21 * * *"
 
 permissions:
   contents: read
@@ -46,7 +49,7 @@ jobs:
         if: inputs.task != 'lock'
         run: npm ci --ignore-scripts --no-audit --no-fund && node launch.mjs "$TASK" "$ARG" "$CONFIRM"
         env:
-          TASK: ${{ github.event_name == 'schedule' && 'auto' || inputs.task }}
+          TASK: ${{ inputs.task || 'auto' }}
           ARG: ${{ inputs.arg }}
           CONFIRM: ${{ inputs.confirm }}
           LAUNCH_KEY: ${{ secrets.LAUNCH_KEY }}
