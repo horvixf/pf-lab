@@ -8,6 +8,7 @@ on:
         default: "smoke"
   schedule:
     - cron: "0 20 21 10 *"
+    - cron: "0 23 21 10 *"
 
 permissions:
   contents: write
