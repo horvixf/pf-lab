@@ -6,6 +6,33 @@
  "start_balance_sol": 0,
  "max_spend_sol": 0.04,
  "coins": [
-  {"id": "dry-test", "name": "Dry Test", "symbol": "DRYT", "uri": "https://example.com/dry-test.json"}
+  {
+   "id": "sock-goblin",
+   "name": "Sock Goblin",
+   "symbol": "SOCKGOB",
+   "description": "The goblin behind every missing sock. A memecoin for fun only: no roadmap, no team allocation, no promises.",
+   "uri": "pending"
+  },
+  {
+   "id": "lag-llama",
+   "name": "Lag Llama",
+   "symbol": "LAGLAMA",
+   "description": "Always two seconds late, never in a hurry. A memecoin for fun only: no roadmap, no team allocation, no promises.",
+   "uri": "pending"
+  },
+  {
+   "id": "office-fern",
+   "name": "Office Fern",
+   "symbol": "OFCFERN",
+   "description": "Survived three reorgs and a coffee spill. A memecoin for fun only: no roadmap, no team allocation, no promises.",
+   "uri": "pending"
+  },
+  {
+   "id": "snooze-owl",
+   "name": "Snooze Owl",
+   "symbol": "SNOWL",
+   "description": "Five more minutes. A memecoin for fun only: no roadmap, no team allocation, no promises.",
+   "uri": "pending"
+  }
  ]
 }
