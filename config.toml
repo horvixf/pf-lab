@@ -1,6 +1,7 @@
 [window]
 start = "2026-09-15"
-days = 14
+days = 21
+a_end = "2026-09-29"
 test_from = "2026-09-25"
 
 [rpc]
@@ -29,6 +30,14 @@ seed = 20261007
 grads = 1500
 non = 5000
 max_pages = 5
+
+[rep]
+start = "2026-09-29"
+end = "2026-10-06"
+lw_start = "2026-09-22"
+non = 1500
+max_pages = 3
+t_pass = 2.24
 
 [fund]
 top_wallets = 8
