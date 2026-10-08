@@ -3,7 +3,7 @@ import json
 import random
 import sys
 import time
-from collections import Counter
+from collections import Counter, defaultdict
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
 from pathlib import Path
@@ -337,6 +337,45 @@ def namecheck():
         sym = con.execute("SELECT COUNT(*) FROM creates WHERE lower(trim(symbol)) = ?", (c["symbol"].lower().strip(),)).fetchone()[0]
         part = con.execute("SELECT COUNT(*) FROM creates WHERE lower(name) LIKE ?", (f"%{c['name'].lower().split()[-1]}%",)).fetchone()[0]
         print(f"{c['id']}: name matches {n[0]}, symbol matches {sym}, names containing '{c['name'].split()[-1]}' {part}", flush=True)
+
+
+def own():
+    rpc, dec, con = Rpc(), Decoder(), db()
+    cfg = json.loads((Path(__file__).parent / "launch" / "coins.json").read_text())
+    con.execute("CREATE TABLE IF NOT EXISTS own(mint TEXT PRIMARY KEY, id TEXT, t0 INTEGER, trades INTEGER, buyers INTEGER, outside_sol REAL, strict_sol REAL, graduated INTEGER)")
+    data = {}
+    for c in cfg["coins"]:
+        t0, grad, tr = None, 0, []
+        for page in rpc.gtfa(c["mint"], max_pages=3):
+            for tx in page:
+                for e in dec.events(tx)[0]:
+                    if e["_"] == "CreateEvent" and e["mint"] == c["mint"]:
+                        t0 = e["timestamp"]
+                    elif e["_"] == "CompleteEvent" and e.get("mint") == c["mint"]:
+                        grad = 1
+                    elif e["_"] == "TradeEvent" and e.get("mint") == c["mint"] and e["user"] != cfg["payer"]:
+                        tr.append((e["timestamp"], e["user"], e["is_buy"], e["sol_amount"], e["creator_fee"]))
+        if t0:
+            data[c["id"]] = (c["mint"], t0, grad, [t for t in tr if t[0] <= t0 + 259200])
+    seen = Counter(u for _, _, _, tr in data.values() for u in {t[1] for t in tr})
+    out = []
+    for cid, (mint, t0, grad, tr) in data.items():
+        w = defaultdict(lambda: [0, 0, 0, 0])
+        for ts, u, buy, q, cf in tr:
+            w[u][0] += 1
+            w[u][1 if buy else 2] += q
+            w[u][3] += cf
+        strict = sum(v[3] for u, v in w.items() if seen[u] >= 2 or v[0] <= 3 or v[1] + v[2] == 0 or abs(v[1] - v[2]) / (v[1] + v[2]) > 0.5)
+        row = (mint, cid, t0, len(tr), len({t[1] for t in tr if t[2]}), sum(v[3] for v in w.values()) / 1e9, strict / 1e9, grad)
+        con.execute("INSERT OR REPLACE INTO own VALUES(?,?,?,?,?,?,?,?)", row)
+        out.append({"id": cid, "age_h": round((time.time() - t0) / 3600, 1), "trades_72h": row[3], "buyers": row[4],
+                    "outside_fee_sol": round(row[5], 6), "strict_fee_sol": round(row[6], 6), "reached_bar": row[6] >= cfg["bar_sol"], "graduated": bool(grad)})
+    con.commit()
+    hits, done = sum(o["reached_bar"] for o in out), sum(o["age_h"] >= 72 for o in out)
+    verdict = "continue" if hits >= 2 or any(o["graduated"] for o in out) else "pending" if done < 4 else "stop" if hits == 0 else "extend: 4 more launches"
+    OUT.mkdir(exist_ok=True)
+    (OUT / "own.json").write_text(json.dumps({"bar_sol": cfg["bar_sol"], "coins": out, "verdict": verdict}, indent=1))
+    status("own", json.dumps({"bar_sol": cfg["bar_sol"], "coins": out, "verdict": verdict}, indent=1) + f" | credits {rpc.credits:,}")
 
 
 def report():
