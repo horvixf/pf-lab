@@ -10,7 +10,12 @@ from lib import CFG, db
 
 WSOL = CFG["addr"]["wsol"]
 LAM = 1e9
-TEST = int(datetime.fromisoformat(CFG["window"]["test_from"]).replace(tzinfo=timezone.utc).timestamp())
+def ts_of(d):
+    return int(datetime.fromisoformat(d).replace(tzinfo=timezone.utc).timestamp())
+
+
+TEST = ts_of(CFG["window"]["test_from"])
+A0, A1 = ts_of(CFG["window"]["start"]), ts_of(CFG["window"]["a_end"])
 OUT = Path(__file__).parent / "out"
 RND = random.Random(7)
 BOOT = 1000
@@ -54,17 +59,19 @@ def bucket(v, edges, labels):
     return labels[bisect.bisect_right(edges, v)]
 
 
-def universe(con):
+def universe(con, t0=A0, t1=A1, lw0=A0, lw1=A1):
     rows = con.execute("""SELECT c.mint, c.ts, c.slot, c.creator, c.payer, lower(trim(c.name)), c.quote, c.mayhem,
         c.cashback, c.holder, c.dev_q, c.oth_n, c.payer_delta, c.tx_fee, k.complete, m.ts, m.quote_amt
         FROM creates c LEFT JOIN curves k USING(mint) LEFT JOIN migr m USING(mint)""").fetchall()
-    per_creator = Counter(r[3] for r in rows)
+    per_creator = Counter(r[3] for r in rows if lw0 <= r[1] < lw1)
     names = defaultdict(list)
     for r in sorted(rows, key=lambda r: r[1]):
         names[r[5]].append(r[1])
     U = {}
     for (mint, ts, slot, creator, payer, name, quote, mayhem, cashback, holder, dev_q, oth_n, pdelta, fee,
          complete, mts, mq) in rows:
+        if not t0 <= ts < t1:
+            continue
         sol = quote == WSOL
         grad = complete == 1
         gsec = mts - ts if (grad and mts) else None
@@ -89,7 +96,7 @@ def sampled(con, U):
     S = {}
     for mint, stratum, capped in con.execute("SELECT mint, stratum, capped FROM sample WHERE pages IS NOT NULL"):
         if mint in U:
-            S[mint] = {"stratum": stratum, "capped": capped, "cfee": 0, "buy": 0, "sell": 0, "create_buy": 0, "pre_buy": 0,
+            S[mint] = {"stratum": stratum[0], "capped": capped, "cfee": 0, "buy": 0, "sell": 0, "create_buy": 0, "pre_buy": 0,
                        "n_curve": 0, "n_amm": 0, "same_slot": 0, "buyers": set(), "dev_tok": 0}
     wal = defaultdict(lambda: defaultdict(lambda: [0, 0, 0, 0]))
     for mint, ts, slot, user, buy, q, tok, fee, cfee, venue in con.execute("SELECT * FROM trades"):
@@ -434,6 +441,29 @@ def main():
     R["robust"] = {k: (v if not isinstance(v, dict) or "mean" not in v else
                        {x: v[x] for x in ("mean", "se", "t", "ci95", "mean_by_stratum", "grad_share", "est_launches", "n_sampled")})
                    for k, v in rob.items()}
+    Rc = CFG["rep"]
+    b0, b1, l0 = ts_of(Rc["start"]), ts_of(Rc["end"]), ts_of(Rc["lw_start"])
+    Ur = universe(con, b0, b1, l0, b1)
+    Sr = sampled(con, Ur)
+    if Sr:
+        rep = {"launches": len(Ur), "graduates": sum(u["grad"] for u in Ur.values()),
+               "organic_u": sum(u["organic_u"] for u in Ur.values()), "sampled": Counter(s["stratum"] for s in Sr.values()),
+               "capped": sum(s["capped"] or 0 for s in Sr.values()), "meta_ok": sum(s["meta_ok"] for s in Sr.values())}
+        base_r = lambda u: u["plain"] and (u["dev"] or 0) <= 0.1 and u["launches"] <= 4
+        Ls = lambda u: base_r(u) and (not u["grad"] or u["organic_u"])
+        xweb = lambda s: s.get("meta_ok") and s["twitter"] and s["website"]
+        for name, M in (("S1", None), ("S2", xweb)):
+            M2 = lambda s, M=M: (M is None or M(s)) and (s["stratum"] == "n" or s["organic2"])
+            e = estimate(Ur, Sr, Ls, M2, strict)
+            og2 = sorted((s["cfee_strict"], m) for m, s in Sr.items() if s["stratum"] == "g" and s["organic2"] and Ls(Ur[m]) and (M is None or M(s)))
+            ng = sorted((s["cfee_strict"], m) for m, s in Sr.items() if s["stratum"] == "n" and Ls(Ur[m]))
+            drop = {m for _, m in og2[-3:]} | {m for _, m in ng[-5:]}
+            d = estimate(Ur, {m: s for m, s in Sr.items() if m not in drop}, Ls, M2, strict)
+            rep[name] = e
+            rep[name + "_drop_g3_n5"] = d and {x: d[x] for x in ("mean", "se", "t", "ci95", "mean_by_stratum", "grad_share", "n_sampled")}
+            rep[name + "_pass"] = bool(e and e["mean"] > 0 and (e["t"] or 0) > Rc["t_pass"])
+            rep[name + "_pass_robust"] = bool(d and d["mean"] > 0 and (d["t"] or 0) > Rc["t_pass"])
+        R["replication"] = rep
     R["funding"] = funding(con, U, S)
     if R["funding"]:
         for s in S.values():
