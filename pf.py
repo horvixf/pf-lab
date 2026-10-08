@@ -189,15 +189,37 @@ def sample():
     status("sample", f"graduates {len(g):,} of {len(grads):,} | non-graduates {len(n):,} of {len(non):,}")
 
 
+def sample2():
+    import report as rp
+    con, Rc = db(), CFG["rep"]
+    if con.execute("SELECT COUNT(*) FROM sample WHERE stratum IN ('g2', 'n2')").fetchone()[0]:
+        print("rep sample exists")
+        return
+    days = con.execute("SELECT COUNT(*) FROM done WHERE task='ledger'").fetchone()[0]
+    missing = con.execute("SELECT COUNT(*) FROM creates WHERE mint NOT IN (SELECT mint FROM curves)").fetchone()[0]
+    if days < len(DAYS) or missing:
+        sys.exit(f"sample2 blocked: ledger days {days}/{len(DAYS)}, curves missing {missing:,}")
+    b1 = rp.ts_of(Rc["end"])
+    U = rp.universe(con, rp.ts_of(Rc["start"]), b1, rp.ts_of(Rc["lw_start"]), b1)
+    base = sorted(m for m, u in U.items() if u["plain"] and (u["dev"] or 0) <= 0.1 and u["launches"] <= 4)
+    g = [m for m in base if U[m]["organic_u"]]
+    n = [m for m in base if U[m]["curve_known"] and not U[m]["grad"]]
+    n = random.Random(S["seed"] + 1).sample(n, min(len(n), Rc["non"]))
+    con.executemany("INSERT INTO sample(mint, stratum) VALUES(?,?)", [(m, "g2") for m in g] + [(m, "n2") for m in n])
+    con.commit()
+    status("sample2", f"window launches {len(U):,} | S1 base {len(base):,} | organic graduates census {len(g):,} | non-graduates {len(n):,}")
+
+
 def trades():
     rpc, dec, con = Rpc(), Decoder(), db()
-    rows = con.execute("""SELECT s.mint, m.pool, c.quote FROM sample s JOIN creates c USING(mint)
+    rows = con.execute("""SELECT s.mint, m.pool, c.quote, s.stratum FROM sample s JOIN creates c USING(mint)
         LEFT JOIN migr m USING(mint) WHERE s.pages IS NULL""").fetchall()
 
     def job(r):
-        mint, pool, quote = r
+        mint, pool, quote, stratum = r
+        cap = CFG["rep"]["max_pages"] if stratum.endswith("2") else S["max_pages"]
         out, pages, full = [], 0, False
-        for page in rpc.gtfa(mint, max_pages=S["max_pages"]):
+        for page in rpc.gtfa(mint, max_pages=cap):
             pages += 1
             full = len(page) >= 1000
             for tx in page:
@@ -211,7 +233,7 @@ def trades():
                                     e["quote_amount_in"] if b else e["quote_amount_out"],
                                     e["base_amount_out"] if b else e["base_amount_in"],
                                     e.get("protocol_fee", 0) + e.get("lp_fee", 0), e.get("coin_creator_fee", 0), 1))
-        return mint, out, pages, int(full and pages >= S["max_pages"])
+        return mint, out, pages, int(full and pages >= cap)
 
     def write(con, res):
         mint, out, pages, capped = res
