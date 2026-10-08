@@ -35,6 +35,8 @@ CREATE TABLE IF NOT EXISTS meta(
   image TEXT, ath REAL, replies INTEGER, descr TEXT);
 CREATE TABLE IF NOT EXISTS snap(mint TEXT PRIMARY KEY, ts INTEGER, dex TEXT, mcap REAL, liq REAL, vol24 REAL, txns24 INTEGER);
 CREATE TABLE IF NOT EXISTS done(task TEXT, key TEXT, PRIMARY KEY(task, key));
+CREATE TABLE IF NOT EXISTS targets(mint TEXT, addr TEXT, role TEXT, cfee INTEGER, n INTEGER, PRIMARY KEY(mint, addr, role));
+CREATE TABLE IF NOT EXISTS funding(addr TEXT PRIMARY KEY, funder TEXT, ts INTEGER, sig TEXT, lamports INTEGER);
 """
 
 
@@ -131,8 +133,8 @@ class Rpc:
             time.sleep(min(60, 2**attempt))
         raise RuntimeError(f"{method} gave up")
 
-    def gtfa(self, addr, filters=None, full=True, max_pages=0):
-        opt = {"transactionDetails": "full" if full else "signatures", "sortOrder": "asc", "limit": 1000,
+    def gtfa(self, addr, filters=None, full=True, max_pages=0, limit=1000):
+        opt = {"transactionDetails": "full" if full else "signatures", "sortOrder": "asc", "limit": limit,
                "filters": {"status": "succeeded", "tokenAccounts": "none", **(filters or {})}}
         if full:
             opt.update(encoding="json", maxSupportedTransactionVersion=1)
