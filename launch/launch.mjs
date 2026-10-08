@@ -78,18 +78,20 @@ async function send(tx, signers, blockhash, lastValidBlockHeight) {
   return sig;
 }
 
-async function launch(id, live) {
+async function launch(id, live, auto = false) {
   const c = coin(id);
   const payer = keypair("LAUNCH_KEY");
   const mint = mintFor(id);
+  if (c.mint && mint.publicKey.toBase58() !== c.mint) throw new Error("derived mint does not match config");
   if (await conn.getAccountInfo(mint.publicKey)) throw new Error(`coin ${id} already launched: ${mint.publicKey.toBase58()}`);
   const { tx, blockhash, lastValidBlockHeight } = await build(payer.publicKey, await createIxs(c, payer.publicKey, mint.publicKey));
   const s = await simulate(tx, payer.publicKey);
   const facts = { id, name: c.name, symbol: c.symbol, uri: c.uri, mint: mint.publicKey.toBase58(), payer: payer.publicKey.toBase58(), cu_price: CFG.cu_price };
+  if (s.cost > CFG.max_cost_sol * LAMPORTS_PER_SOL) throw new Error(`cost ${sol(s.cost)} above per-launch cap`);
   const used = await spent(payer.publicKey, s.cost);
   console.log(JSON.stringify({ ...facts, balance_sol: sol(s.pre), cost_sol: sol(s.cost), spent_after_sol: sol(used), cu: s.cu, bytes: s.size }, null, 1));
   if (!live) return console.log(`preview code: ${code(facts)} (valid about 15-30 min)`);
-  if (confirm !== code(facts) && confirm !== code(facts, 1)) throw new Error("confirm code does not match a fresh preview");
+  if (!auto && confirm !== code(facts) && confirm !== code(facts, 1)) throw new Error("confirm code does not match a fresh preview");
   const sig = await send(tx, [payer, mint], blockhash, lastValidBlockHeight);
   const bc = await new OnlinePumpSdk(conn).fetchBondingCurve(mint.publicKey);
   console.log(JSON.stringify({ sent: sig, mint: facts.mint, creator_ok: bc.creator.equals(payer.publicKey), url: `https://pump.fun/coin/${facts.mint}` }, null, 1));
@@ -137,6 +139,19 @@ async function status() {
     creator_vault_sol: sol(await online.getCreatorVaultBalanceBothPrograms(payer)), coins: rows }, null, 1));
 }
 
+async function auto() {
+  const now = new Date();
+  const h = now.getUTCHours();
+  const today = now.toISOString().slice(0, 10);
+  if (h >= CFG.window_utc[0] && h < CFG.window_utc[1]) {
+    const next = [];
+    for (const c of CFG.coins) if (!(await conn.getAccountInfo(mintFor(c.id).publicKey))) next.push(c);
+    if (next.length && next[0].date <= today) await launch(next[0].id, true, true);
+    else console.log(next.length ? `next launch: ${next[0].id} on ${next[0].date}` : "all coins launched");
+  } else console.log(`outside launch window (${h} UTC)`);
+  await status();
+}
+
 async function dry(id, payerAddr) {
   const c = coin(id);
   const payer = new PublicKey(payerAddr);
@@ -155,6 +170,7 @@ const tasks = {
   sweep_preview: () => sweep(false),
   sweep: () => sweep(true),
   status,
+  auto,
 };
 if (!tasks[task]) throw new Error(`task must be one of ${Object.keys(tasks).join(", ")}`);
 await tasks[task]();
