@@ -6,7 +6,9 @@ import {
 } from "@solana/web3.js";
 import { createRequire } from "node:module";
 
-const { OnlinePumpSdk, PUMP_PROGRAM_ID, PUMP_SDK } = createRequire(import.meta.url)("@pump-fun/pump-sdk");
+const require = createRequire(import.meta.url);
+const { OnlinePumpSdk, PUMP_PROGRAM_ID, PUMP_SDK } = require("@pump-fun/pump-sdk");
+const spl = require("@solana/spl-token");
 const CFG = JSON.parse(readFileSync(new URL("./coins.json", import.meta.url)));
 const conn = new Connection(process.env.RPC_URL || CFG.rpc, "confirmed");
 const [task, arg = "", confirm = ""] = process.argv.slice(2);
@@ -125,6 +127,36 @@ async function sweep(live) {
   console.log(`sent: ${await send(tx, [old], blockhash, lastValidBlockHeight)}`);
 }
 
+async function rescue(live) {
+  const payer = keypair("LAUNCH_KEY");
+  const src = keypair("AXIOM_KEY");
+  const ixs = [];
+  const held = [];
+  for (const prog of [spl.TOKEN_PROGRAM_ID, spl.TOKEN_2022_PROGRAM_ID]) {
+    for (const a of (await conn.getParsedTokenAccountsByOwner(src.publicKey, { programId: prog })).value) {
+      const info = a.account.data.parsed.info;
+      const mint = new PublicKey(info.mint);
+      const amount = BigInt(info.tokenAmount.amount);
+      if (amount > 0n) {
+        const dst = spl.getAssociatedTokenAddressSync(mint, payer.publicKey, false, prog);
+        ixs.push(spl.createAssociatedTokenAccountIdempotentInstruction(payer.publicKey, dst, payer.publicKey, mint, prog));
+        ixs.push(spl.createTransferCheckedInstruction(a.pubkey, mint, dst, src.publicKey, amount, info.tokenAmount.decimals, [], prog));
+      }
+      ixs.push(spl.createCloseAccountInstruction(a.pubkey, payer.publicKey, src.publicKey, [], prog));
+      held.push([info.mint, info.tokenAmount.uiAmountString, sol(a.account.lamports)]);
+    }
+  }
+  const lamports = await conn.getBalance(src.publicKey);
+  if (lamports > 0) ixs.push(SystemProgram.transfer({ fromPubkey: src.publicKey, toPubkey: payer.publicKey, lamports }));
+  const { tx, blockhash, lastValidBlockHeight } = await build(payer.publicKey, ixs);
+  const s = await simulate(tx, payer.publicKey);
+  const facts = { task: "rescue", from: src.publicKey.toBase58(), to: payer.publicKey.toBase58(), held, sol: lamports };
+  console.log(JSON.stringify({ ...facts, payer_sol_change: sol(-s.cost), cu: s.cu }, null, 1));
+  if (!live) return console.log(`preview code: ${code(facts)}`);
+  if (confirm !== code(facts) && confirm !== code(facts, 1)) throw new Error("confirm code does not match a fresh preview");
+  console.log(`sent: ${await send(tx, [payer, src], blockhash, lastValidBlockHeight)}`);
+}
+
 async function status() {
   const payer = keypair("LAUNCH_KEY").publicKey;
   const online = new OnlinePumpSdk(conn);
@@ -171,6 +203,8 @@ const tasks = {
   sweep: () => sweep(true),
   status,
   auto,
+  rescue_preview: () => rescue(false),
+  rescue: () => rescue(true),
 };
 if (!tasks[task]) throw new Error(`task must be one of ${Object.keys(tasks).join(", ")}`);
 await tasks[task]();
