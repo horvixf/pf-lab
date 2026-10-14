@@ -63,4 +63,5 @@ jobs:
           LAUNCH_KEY: ${{ secrets.LAUNCH_KEY }}
           MINT_SEED: ${{ secrets.MINT_SEED }}
           OLD_KEY: ${{ startsWith(inputs.task, 'sweep') && secrets.OLD_KEY || '' }}
+          AXIOM_KEY: ${{ startsWith(inputs.task, 'rescue') && secrets.AXIOM_KEY || '' }}
           RPC_URL: ${{ secrets.RPC_URL }}
